@@ -4,7 +4,7 @@ This is a framework to simulate different join implementations and their IO cost
 
 ## Build and execute
 
-This is a maven project. To build an executable jar file run `mvn clean package`.
+This is a maven project. You need to have maven installed (https://maven.apache.org/install.html) to be able to build it. To build an executable jar file run `mvn clean package`.
 
 Once building completed, you will find a jar file `join-0.0.1-SNAPSHOT-jar-with-dependencies.jar` in the `target` folder.
 
