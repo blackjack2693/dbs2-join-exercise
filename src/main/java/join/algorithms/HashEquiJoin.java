@@ -2,6 +2,7 @@ package join.algorithms;
 
 import java.util.function.Consumer;
 
+import join.datastructures.Block;
 import join.datastructures.Relation;
 import join.datastructures.Tuple;
 import join.manager.BlockManager;
@@ -18,45 +19,67 @@ public class HashEquiJoin implements Join {
 	@Override
 	public void join(Relation relation1, int joinAttribute1, Relation relation2, int joinAttribute2,
 			Consumer<Tuple> consumer) {
-		// TODO: hash
-		// M = freeBlocks
-		int freeBlocks = blockManager.getFreeBlockCount();
 
-		Block [] buffers = new Block[freeBlocks - 1];
+		// Put tuples of each relation into buckets
+		Relation[] relation1HashTable= setupHashTable(relation1, joinAttribute1,false);
+		Relation[] relation2HashTable = setupHashTable(relation2, joinAttribute2, true);
 
-		for (int i = 0; i < freeBlocks - 1; i++) {
-			buffers[i] = blockManager.getFreeBlock();
-		}
-		//get Tuple
-		for(int b = 0; b < relation1.getBlockCount(); b++) {
-			Block block = relation1.getBlock(b);
-			blockManager.pin(block);
-			while(block.hasNext()) {
-				Tuple tuple = block.Next()
-				int hash = tuple.hashCode();
-				if(!buffers[hash].addTuple(tuple)) {
-					buffers[hash]
-					//write to disk and safe the hash to grab later
-
-					blockmanager.unpin(buffers[hash]);
-					buffers[hash] = blockManager.getFreeBlock();
-					buffers[hash].addTuple(tuple)
-				}
-		
-				}
-		}
-		for(int b = 0; b < buffers.length; b++) {
-			blockManager.unpin(buffers[b]);
-		}
 		NestedLoopEquiJoin nestedLoopJoin = new NestedLoopEquiJoin(blockManager);
 		for (int i = 0; i < numBuckets; ++i) {
-			// TODO: join
+			// Join each relation which represents one bucket
+			nestedLoopJoin.join(relation1HashTable[i], joinAttribute1, relation2HashTable[i], joinAttribute2, consumer);
 		}
+	}
+
+	private int getHashValue(Tuple tuple, int joinAttribute){
+		return Math.abs(tuple.getData(joinAttribute).hashCode()) % numBuckets;
+	}
+
+	private Relation[] setupHashTable(Relation relation, int joinAttribute, boolean keepPinned){
+		// Each HashValue gets an own Relation
+		Relation[] relationHashTable = new Relation[numBuckets];
+		// Each HashValue buffers maximum one block to add tuples
+		Block[] bufferedBlockHashTable = new Block[numBuckets];
+
+		for(Block block: relation){
+			blockManager.pin(block);
+			for(Tuple tuple: block){
+				int hashValue = getHashValue(tuple, joinAttribute);
+				if(relationHashTable[hashValue] == null){
+					// No relation exists for this HashValue
+					relationHashTable[hashValue] = new Relation(false);
+				}
+				Relation bucketRelation = relationHashTable[hashValue];
+				if(bufferedBlockHashTable[hashValue] == null){
+					// No block buffered for this HashValue
+					Block newBucketBlock = bucketRelation.getFreeBlock(blockManager);
+					blockManager.pin(newBucketBlock);
+					bufferedBlockHashTable[hashValue] = newBucketBlock;
+				}
+				Block bucketBlock = bufferedBlockHashTable[hashValue];
+				if(!bucketBlock.addTuple(tuple)){
+					// Buffered block for this HasValue is full
+					blockManager.unpin(bucketBlock);
+					Block newBucketBlock = bucketRelation.getFreeBlock(blockManager);
+					blockManager.pin(newBucketBlock);
+					bufferedBlockHashTable[hashValue] = newBucketBlock;
+					newBucketBlock.addTuple(tuple);
+				}
+			}
+			blockManager.unpin(block);
+		}
+		// Flush buffered blocks
+		for(Block block: bufferedBlockHashTable) {
+			if (block == null || keepPinned)
+				continue;
+			blockManager.unpin(block);
+		}
+
+		return relationHashTable;
 	}
 
 	@Override
 	public int getIOEstimate(Relation relation1, Relation relation2) {
 		return 3 * (relation1.getBlockCount() + relation2.getBlockCount());
 	}
-
 }
