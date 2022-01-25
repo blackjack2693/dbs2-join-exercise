@@ -18,58 +18,69 @@ public class HashEquiJoin implements Join {
 
 	@Override
 	public void join(Relation relation1, int joinAttribute1, Relation relation2, int joinAttribute2,
-			Consumer<Tuple> consumer) {
-
+			Consumer<Tuple> consumer) 
+	{
 		// Put tuples of each relation into buckets
 		Relation[] relation1HashTable= setupHashTable(relation1, joinAttribute1,false);
 		Relation[] relation2HashTable = setupHashTable(relation2, joinAttribute2, true);
 
 		NestedLoopEquiJoin nestedLoopJoin = new NestedLoopEquiJoin(blockManager);
-		for (int i = 0; i < numBuckets; ++i) {
+		for (int i = 0; i < numBuckets; ++i)
+		{
 			// Join each relation which represents one bucket
 			nestedLoopJoin.join(relation1HashTable[i], joinAttribute1, relation2HashTable[i], joinAttribute2, consumer);
 		}
 	}
 
-	private int getHashValue(Tuple tuple, int joinAttribute){
+	private int getHashValue(Tuple tuple, int joinAttribute, int size)
+	{
 		return Math.abs(tuple.getData(joinAttribute).hashCode()) % numBuckets;
 	}
 
 	private Relation[] setupHashTable(Relation relation, int joinAttribute, boolean keepPinned){
-		// Each HashValue gets an own Relation
+		// We have a relation foe every hashValue.
 		Relation[] relationHashTable = new Relation[numBuckets];
+		
 		// Each HashValue buffers maximum one block to add tuples
-		Block[] bufferedBlockHashTable = new Block[numBuckets];
+		Block[] hashTableForBlocks = new Block[numBuckets];
 
-		for(Block block: relation){
+		for(Block block: relation)
+		{
 			blockManager.pin(block);
-			for(Tuple tuple: block){
-				int hashValue = getHashValue(tuple, joinAttribute);
-				if(relationHashTable[hashValue] == null){
-					// No relation exists for this HashValue
+			for(Tuple tuple: block)
+			{
+				int hashValue = getHashValue(tuple, joinAttribute, numBuckets);
+				if(relationHashTable[hashValue] == null)
+				{
+					// Because no relation exists for this HashValue, we create one
 					relationHashTable[hashValue] = new Relation(false);
 				}
+				
 				Relation bucketRelation = relationHashTable[hashValue];
-				if(bufferedBlockHashTable[hashValue] == null){
-					// No block buffered for this HashValue
+				if(hashTableForBlocks[hashValue] == null)
+				{
+					// Because we have no block buffered for this HashValue, we buffer a new Block from the relation 
 					Block newBucketBlock = bucketRelation.getFreeBlock(blockManager);
 					blockManager.pin(newBucketBlock);
-					bufferedBlockHashTable[hashValue] = newBucketBlock;
+					hashTableForBlocks[hashValue] = newBucketBlock;
 				}
-				Block bucketBlock = bufferedBlockHashTable[hashValue];
-				if(!bucketBlock.addTuple(tuple)){
-					// Buffered block for this HasValue is full
+				Block bucketBlock = hashTableForBlocks[hashValue];
+				if(!bucketBlock.addTuple(tuple))
+				{
+					// Buffered block for this HasValue is full: we get a new one 
 					blockManager.unpin(bucketBlock);
 					Block newBucketBlock = bucketRelation.getFreeBlock(blockManager);
 					blockManager.pin(newBucketBlock);
-					bufferedBlockHashTable[hashValue] = newBucketBlock;
+					hashTableForBlocks[hashValue] = newBucketBlock;
+					//Add current tuple to Hashtable
 					newBucketBlock.addTuple(tuple);
 				}
 			}
 			blockManager.unpin(block);
 		}
-		// Flush buffered blocks
-		for(Block block: bufferedBlockHashTable) {
+		//unpin all blocks. 
+		for(Block block: hashTableForBlocks)
+		{
 			if (block == null || keepPinned)
 				continue;
 			blockManager.unpin(block);
